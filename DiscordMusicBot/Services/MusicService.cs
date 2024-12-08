@@ -27,7 +27,7 @@ public class MusicService
                 return;
             var audioClient = await channel.ConnectAsync();
             var cts = new CancellationTokenSource();
-            _ = KeepAliveSilenceAsync(audioClient, cts.Token, TimeSpan.FromHours(1));
+            //_ = KeepAliveSilenceAsync(audioClient, cts.Token, TimeSpan.FromHours(1));
             _connectedChannels[channel.GuildId] = audioClient;
         }
         catch (Exception e)
@@ -98,7 +98,7 @@ public class MusicService
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = "ffmpeg",
-                    Arguments = "-hide_banner -loglevel panic -i pipe:0 -ac 2 -f s16le -ar 48000 pipe:1",
+                    Arguments = "-hide_banner -i pipe:0 -f s16le -ar 48000 -ac 2 pipe:1",
                     UseShellExecute = false,
                     RedirectStandardInput = true,
                     RedirectStandardOutput = true,
@@ -128,8 +128,8 @@ public class MusicService
             int bytesRead;
             while ((bytesRead = pcmStream.Read(buffer, 0, buffer.Length)) > 0)
             {
-                if (bytesRead < buffer.Length)
-                    break;
+                Console.WriteLine("bytes:" + bytesRead);
+                Console.WriteLine("buffer:" + buffer.Length);
 
                 short[] pcm = new short[frameSize * 2];
                 Buffer.BlockCopy(buffer, 0, pcm, 0, buffer.Length);
