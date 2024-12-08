@@ -1,6 +1,7 @@
 ﻿using Discord.Commands;
 using Discord.WebSocket;
 using DiscordMusicBot.Services;
+using System;
 
 namespace DiscordMusicBot.Modules;
 
@@ -30,8 +31,15 @@ public class MusicModule : ModuleBase<SocketCommandContext>
     [Command("play", RunMode = RunMode.Async)]
     public async Task PlayAsync([Remainder] string query)
     {
-        await _musicService.PlayAsync(Context.Guild, query);
-        await ReplyAsync("Now playing...");
+        var guild = Context.Guild;
+        if (guild == null)
+        {
+            await ReplyAsync("This command can only be used in a server.");
+            return;
+        }
+
+        var result = await _musicService.PlayAsync(guild, query);
+        await ReplyAsync(result);
     }
 
     [Command("stop", RunMode = RunMode.Async)]
@@ -39,5 +47,19 @@ public class MusicModule : ModuleBase<SocketCommandContext>
     {
         await _musicService.StopAsync(Context.Guild);
         await ReplyAsync("Stopped playback.");
+    }
+
+    [Command("queue", RunMode = RunMode.Async)]
+    public async Task ShowQueueAsync()
+    {
+        var guild = Context.Guild;
+        if (guild == null)
+        {
+            await ReplyAsync("This command can only be used in a server.");
+            return;
+        }
+
+        var result = await _musicService.ShowQueueAsync(guild);
+        await ReplyAsync(result);
     }
 }

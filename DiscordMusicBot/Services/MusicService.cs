@@ -4,6 +4,9 @@ using Concentus.Enums;
 using Discord;
 using Discord.Audio;
 using Discord.WebSocket;
+using DiscordMusicBot.Models;
+using System.Collections.Concurrent;
+using Discord.Commands;
 
 namespace DiscordMusicBot.Services;
 
@@ -13,6 +16,10 @@ public class MusicService
 
     private readonly Dictionary<ulong, IAudioClient> _connectedChannels = new();
     private readonly Dictionary<ulong, CancellationTokenSource> _playbackCts = new();
+
+    private readonly Dictionary<ulong, ConcurrentQueue<Song>> _songQueues = new();
+    private readonly Dictionary<ulong, TaskCompletionSource<bool>> _playbackCompletionSources = new();
+
 
     public MusicService(DiscordSocketClient client)
     {
@@ -27,7 +34,6 @@ public class MusicService
                 return;
             var audioClient = await channel.ConnectAsync();
             var cts = new CancellationTokenSource();
-            //_ = KeepAliveSilenceAsync(audioClient, cts.Token, TimeSpan.FromHours(1));
             _connectedChannels[channel.GuildId] = audioClient;
         }
         catch (Exception e)
@@ -36,31 +42,44 @@ public class MusicService
         }
     }
 
-    public async Task PlayAsync(IGuild guild, string url)
+    public async Task<string> PlayAsync(IGuild guild, string url)
     {
         if (!_connectedChannels.TryGetValue(guild.Id, out var audioClient))
-            return;
+            return "Bot is not connected to a voice channel.";
 
-        if (_playbackCts.TryGetValue(guild.Id, out var oldCts))
-        {
-            oldCts.Cancel();
-            _playbackCts.Remove(guild.Id);
-        }
+        if (!_songQueues.ContainsKey(guild.Id))
+            _songQueues[guild.Id] = new ConcurrentQueue<Song>();
+
+        var song = new Song { Url = url };
+        _songQueues[guild.Id].Enqueue(song);
+
+        if (_playbackCts.ContainsKey(guild.Id))
+            return $"Added to queue: {url}";
 
         var cts = new CancellationTokenSource();
         _playbackCts[guild.Id] = cts;
+
 
         _ = Task.Run(async () =>
         {
             try
             {
-                await InternalPlayAsync(audioClient, url, cts.Token);
+                while (_songQueues[guild.Id].TryDequeue(out var nextSong))
+                {
+                    await InternalPlayAsync(audioClient, nextSong.Url, cts.Token);
+                }
             }
             catch (Exception e)
             {
-                Console.WriteLine(e);
+                Console.WriteLine($"Error in playback loop: {e.Message}");
+            }
+            finally
+            {
+                _playbackCts.Remove(guild.Id);
             }
         }, cts.Token);
+
+        return $"Now playing: {url}";
     }
 
     public Task StopAsync(IGuild guild)
@@ -89,9 +108,8 @@ public class MusicService
                     CreateNoWindow = true
                 }
             };
-            Console.WriteLine("Starting yt-dlp");
+
             ytDlp.Start();
-            Console.WriteLine("Quiting yt-dlp");
 
             using var ffmpeg = new Process
             {
@@ -128,9 +146,6 @@ public class MusicService
             int bytesRead;
             while ((bytesRead = pcmStream.Read(buffer, 0, buffer.Length)) > 0)
             {
-                Console.WriteLine("bytes:" + bytesRead);
-                Console.WriteLine("buffer:" + buffer.Length);
-
                 short[] pcm = new short[frameSize * 2];
                 Buffer.BlockCopy(buffer, 0, pcm, 0, buffer.Length);
 
@@ -147,30 +162,14 @@ public class MusicService
         }
     }
 
-    private async Task KeepAliveSilenceAsync(IAudioClient audioClient, CancellationToken ct, TimeSpan duration)
+    public Task<string> ShowQueueAsync(IGuild guild)
     {
-        var opusEncoder = new OpusEncoder(48000, 2, Concentus.Enums.OpusApplication.OPUS_APPLICATION_AUDIO)
+        if (!_songQueues.TryGetValue(guild.Id, out var queue) || queue.IsEmpty)
         {
-            Bitrate = 128000
-        };
-
-        short[] pcmSilence = new short[960 * 2]; // 0-filled by default, represents silence.
-        byte[] encodedBuffer = new byte[4000];
-
-        using var discordOut = audioClient.CreateOpusStream();
-        var endTime = DateTime.UtcNow + duration;
-
-        while (DateTime.UtcNow < endTime && !ct.IsCancellationRequested)
-        {
-            int encoded = opusEncoder.Encode(pcmSilence, 0, 960, encodedBuffer, 0, encodedBuffer.Length);
-            if (encoded > 0)
-            {
-                await discordOut.WriteAsync(encodedBuffer.AsMemory(0, encoded), ct);
-            }
-
-            await Task.Delay(200, ct);
+            return Task.FromResult("The queue is empty.");
         }
 
-        await discordOut.FlushAsync();
+        var songList = string.Join("\n", queue.Select((s, i) => $"{i + 1}. {s.Title ?? s.Url}"));
+        return Task.FromResult($"Current queue:\n{songList}");
     }
 }
