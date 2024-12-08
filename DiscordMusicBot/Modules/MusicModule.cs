@@ -1,7 +1,6 @@
 ﻿using Discord.Commands;
 using Discord.WebSocket;
 using DiscordMusicBot.Services;
-using System;
 
 namespace DiscordMusicBot.Modules;
 
@@ -60,6 +59,34 @@ public class MusicModule : ModuleBase<SocketCommandContext>
         }
 
         var result = await _musicService.ShowQueueAsync(guild);
+        await ReplyAsync(result);
+    }
+
+    [Command("pause", RunMode = RunMode.Async)]
+    public async Task PauseAsync()
+    {
+        var guild = Context.Guild;
+        if (guild == null)
+        {
+            await ReplyAsync("This command can only be used in a server.");
+            return;
+        }
+
+        var result = await _musicService.PauseAsync(guild);
+        await ReplyAsync(result);
+    }
+
+    [Command("resume", RunMode = RunMode.Async)]
+    public async Task ResumeAsync()
+    {
+        var guild = Context.Guild;
+        if (guild == null)
+        {
+            await ReplyAsync("This command can only be used in a server.");
+            return;
+        }
+
+        var result = await _musicService.ResumeAsync(guild);
         await ReplyAsync(result);
     }
 }

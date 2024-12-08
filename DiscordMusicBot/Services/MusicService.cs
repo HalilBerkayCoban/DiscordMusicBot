@@ -6,7 +6,6 @@ using Discord.Audio;
 using Discord.WebSocket;
 using DiscordMusicBot.Models;
 using System.Collections.Concurrent;
-using Discord.Commands;
 
 namespace DiscordMusicBot.Services;
 
@@ -18,8 +17,7 @@ public class MusicService
     private readonly Dictionary<ulong, CancellationTokenSource> _playbackCts = new();
 
     private readonly Dictionary<ulong, ConcurrentQueue<Song>> _songQueues = new();
-    private readonly Dictionary<ulong, TaskCompletionSource<bool>> _playbackCompletionSources = new();
-
+    private readonly Dictionary<ulong, bool> _isPaused = new();
 
     public MusicService(DiscordSocketClient client)
     {
@@ -66,7 +64,7 @@ public class MusicService
             {
                 while (_songQueues[guild.Id].TryDequeue(out var nextSong))
                 {
-                    await InternalPlayAsync(audioClient, nextSong.Url, cts.Token);
+                    await InternalPlayAsync(audioClient, nextSong.Url, guild.Id, cts.Token);
                 }
             }
             catch (Exception e)
@@ -93,7 +91,7 @@ public class MusicService
         return Task.CompletedTask;
     }
 
-    private async Task InternalPlayAsync(IAudioClient audioClient, string url, CancellationToken ct)
+    private async Task InternalPlayAsync(IAudioClient audioClient, string url, ulong guildId, CancellationToken ct)
     {
         try
         {
@@ -146,6 +144,14 @@ public class MusicService
             int bytesRead;
             while ((bytesRead = pcmStream.Read(buffer, 0, buffer.Length)) > 0)
             {
+                if (_isPaused.TryGetValue(guildId, out var isPaused) && isPaused)
+                {
+                    while (_isPaused[guildId])
+                    {
+                        await Task.Delay(100, ct);
+                    }
+                }
+
                 short[] pcm = new short[frameSize * 2];
                 Buffer.BlockCopy(buffer, 0, pcm, 0, buffer.Length);
 
@@ -155,6 +161,7 @@ public class MusicService
                     await discordBot.WriteAsync(outBuffer.AsMemory(0, encoded), ct);
                 }
             }
+            await discordBot.FlushAsync(ct);
         }
         catch (Exception e)
         {
@@ -172,4 +179,37 @@ public class MusicService
         var songList = string.Join("\n", queue.Select((s, i) => $"{i + 1}. {s.Title ?? s.Url}"));
         return Task.FromResult($"Current queue:\n{songList}");
     }
+
+    public Task<string> PauseAsync(IGuild guild)
+    {
+        if (!_connectedChannels.ContainsKey(guild.Id))
+            return Task.FromResult("The bot is not connected to a voice channel.");
+
+        if (!_playbackCts.ContainsKey(guild.Id) || !_songQueues.ContainsKey(guild.Id))
+            return Task.FromResult("Nothing is currently playing.");
+
+        if (_isPaused.TryGetValue(guild.Id, out var isPaused) && isPaused)
+            return Task.FromResult("Playback is already paused.");
+
+        _isPaused[guild.Id] = true;
+
+        return Task.FromResult("Playback paused.");
+    }
+
+    public Task<string> ResumeAsync(IGuild guild)
+    {
+        if (!_connectedChannels.ContainsKey(guild.Id))
+            return Task.FromResult("The bot is not connected to a voice channel.");
+
+        if (!_playbackCts.ContainsKey(guild.Id) || !_songQueues.ContainsKey(guild.Id))
+            return Task.FromResult("Nothing is currently paused.");
+
+        if (!_isPaused.TryGetValue(guild.Id, out var isPaused) || !isPaused)
+            return Task.FromResult("Playback is not paused.");
+
+        _isPaused[guild.Id] = false;
+
+        return Task.FromResult("Playback resumed.");
+    }
+
 }
