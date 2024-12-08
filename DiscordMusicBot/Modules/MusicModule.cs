@@ -89,4 +89,19 @@ public class MusicModule : ModuleBase<SocketCommandContext>
         var result = await _musicService.ResumeAsync(guild);
         await ReplyAsync(result);
     }
+
+    [Command("skip", RunMode = RunMode.Async)]
+    public async Task SkipAsync()
+    {
+        var guild = Context.Guild;
+        if (guild == null)
+        {
+            await ReplyAsync("This command can only be used in a server.");
+            return;
+        }
+
+        var result = await _musicService.SkipAsync(guild);
+        await ReplyAsync(result);
+    }
+
 }

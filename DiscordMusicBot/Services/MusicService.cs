@@ -64,7 +64,25 @@ public class MusicService
             {
                 while (_songQueues[guild.Id].TryDequeue(out var nextSong))
                 {
-                    await InternalPlayAsync(audioClient, nextSong.Url, guild.Id, cts.Token);
+                    var cts = new CancellationTokenSource();
+                    _playbackCts[guild.Id] = cts;
+
+                    try
+                    {
+                        await InternalPlayAsync(audioClient, nextSong.Url, guild.Id, cts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        Console.WriteLine("Song was skipped.");
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine($"Error during playback: {e.Message}");
+                    }
+                    finally
+                    {
+                        cts.Dispose();
+                    }
                 }
             }
             catch (Exception e)
@@ -212,4 +230,15 @@ public class MusicService
         return Task.FromResult("Playback resumed.");
     }
 
+    public Task<string> SkipAsync(IGuild guild)
+    {
+        if (!_connectedChannels.ContainsKey(guild.Id))
+            return Task.FromResult("The bot is not connected to a voice channel.");
+
+        if (!_playbackCts.TryGetValue(guild.Id, out var cts))
+            return Task.FromResult("No song is currently playing to skip.");
+
+        cts.Cancel();
+        return Task.FromResult("Skipped the current song.");
+    }
 }
